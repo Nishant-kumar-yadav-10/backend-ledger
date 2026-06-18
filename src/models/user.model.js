@@ -33,7 +33,7 @@ userSchema.pre("save",async function(){
     }
     const hash=await bcrypt.hash(this.password,10)
     this.password=hash
-    return 
+    return
 })
 userSchema.methods.comparePassword=async function(password){
     return bcrypt.compare(password,this.password)
