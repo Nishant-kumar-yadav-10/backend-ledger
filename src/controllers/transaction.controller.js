@@ -6,7 +6,7 @@ const mongoose =require("mongoose")
 async function createTransaction(req,res){
  const {fromAccount,toAccount,amount,idempotencyKey}=req.body
  if(!fromAccount||!toAccount||!amount||!idempotencyKey){
-    res.status(400).json({
+    return res.status(400).json({
         message:"fromaccount toaccount amount idempotencykey are required "
 
     })
@@ -18,7 +18,7 @@ async function createTransaction(req,res){
  const toUserAccount=await accountModel.findOne({
     _id:toAccount
  })
- if(!fromAccount || !toUserAccount){
+ if(!fromUserAccount || !toUserAccount){
     return res.status(400).json({
         message:"invalid fromAccount or toAccount"
     })
@@ -29,7 +29,7 @@ async function createTransaction(req,res){
  })
 
  if(isTransactionAlreadyExists){
-    if(isTransactionAlreadyExists.status=="complete"){
+    if(isTransactionAlreadyExists.status=="success"){
       return  res.status(200).json({
             message:"Transation already processed",
             transaction: isTransactionAlreadyExists
@@ -63,7 +63,7 @@ async function createTransaction(req,res){
 
  const balance=await fromUserAccount.getBalance()
  if(balance<amount){
-    res.status(400).json({
+    return res.status(400).json({
         message:`insufficient balance. Current Balance is ${balance} Requested amount is ${amount}`
  })
  }
@@ -71,6 +71,117 @@ async function createTransaction(req,res){
 const session = await mongoose.startSession()
 session.startTransaction()
 
-const transaction=await transactionModel
+const transaction=new transactionModel({
+   fromAccount,
+   toAccount,
+   amount,
+   idempotencyKey,
+   status:"pending"
 
+
+})
+const debitLedgerEntry=await ledgerModel.create([{
+   account:fromAccount,
+   amount:amount,
+   transaction:transaction._id,
+   type:"debit"
+
+}],{session})
+const creditLedgerEntry=await ledgerModel.create([{
+account:toAccount,
+amount:amount,
+transaction:transaction._id,
+type:"credit"
+}],{session})
+transaction.status="success"
+await transaction.save({session})
+
+await session.commitTransaction()
+session.endSession()
+
+await emailService.sendingTransactionEmail(req.user.email,req.user.name,amount,toAccount)
+return res.status(200).json({
+   message:"Transaction completed successfully",
+   transaction:transaction
+})
+
+}
+async function createInitialFundsTransaction(req,res){
+   try{
+const {toAccount,amount,idempotencyKey}=req.body
+if(!toAccount||!amount||!idempotencyKey){
+   return res.status(400).json({
+        message:"fromaccount toaccount amount idempotencykey are required "
+
+    })
+ }
+ console.log("1")
+
+ const toUserAccount=await accountModel.findOne({
+   _id:toAccount,
+ })
+
+ if(!toUserAccount){
+   return res.status(400).json({
+      message:"Invalid toAccount" 
+   })
+ }
+ console.log("2")
+ const fromUserAccount= await accountModel.findOne({
+   user: req.user._id
+ }) 
+ if(!fromUserAccount){
+   return res.status(400).json({
+      message:"System user account not found"
+   })
+ }
+ console.log("3")
+ const session=await mongoose.startSession()
+ session.startTransaction()
+ const transaction = new transactionModel({
+   fromAccount: fromUserAccount._id,
+   toAccount,
+   amount,
+   idempotencyKey,
+   status: "pending"
+ })
+ console.log("4")
+
+ const debitLedgerEntry=await ledgerModel.create([{
+   account:fromUserAccount._id,
+   amount:amount,
+   transaction:transaction._id,
+   type:"debit"
+
+}],{session})
+console.log("5")
+const creditLedgerEntry=await ledgerModel.create([{
+account:toAccount,
+amount:amount,
+transaction:transaction._id,
+type:"credit"
+}],{session})
+
+transaction.status="success"
+console.log("6")
+await transaction.save({session})
+console.log("7")
+await session.commitTransaction()
+session.endSession()
+console.log("8")
+
+return res.status(201).json({
+   message:"Initial funds transaction completed successdully",
+   transaction:transaction
+})
+   }catch(err){
+console.log(err)
+return res.status(500).json({
+            message: err.message
+        });
+   }
+}
+module.exports={
+   createTransaction,
+   createInitialFundsTransaction
 }
